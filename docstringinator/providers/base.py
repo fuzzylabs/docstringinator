@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 from pydantic import BaseModel
 
-from ..models import DocstringFormat, DocstringInfo
+from docstringinator.models import DocstringFormat, DocstringInfo
 
 
 class LLMResponse(BaseModel):
@@ -14,8 +14,8 @@ class LLMResponse(BaseModel):
 
     content: str
     model: str
-    usage: Dict[str, Any] = None
-    finish_reason: str = None
+    usage: Dict[str, Any] = {}
+    finish_reason: str = ""
 
 
 class LLMProviderBase(ABC):
@@ -34,8 +34,10 @@ class LLMProviderBase(ABC):
         self.timeout = config.get("timeout", 30)
 
     @abstractmethod
-    async def generate_docstring(
-        self, docstring_info: DocstringInfo, format_style: DocstringFormat,
+    def generate_docstring(
+        self,
+        docstring_info: DocstringInfo,
+        format_style: DocstringFormat,
     ) -> LLMResponse:
         """Generate a docstring for the given function.
 
@@ -47,7 +49,11 @@ class LLMProviderBase(ABC):
             Generated docstring response.
         """
 
-    def _create_prompt(self, docstring_info: DocstringInfo, format_style: DocstringFormat) -> str:
+    def _create_prompt(
+        self,
+        docstring_info: DocstringInfo,
+        format_style: DocstringFormat,
+    ) -> str:
         """Create a prompt for docstring generation.
 
         Args:
@@ -63,9 +69,12 @@ class LLMProviderBase(ABC):
             DocstringFormat.RESTRUCTUREDTEXT: self._get_restructuredtext_example(),
         }
 
-        example = format_examples.get(format_style, format_examples[DocstringFormat.GOOGLE])
+        example = format_examples.get(
+            format_style,
+            format_examples[DocstringFormat.GOOGLE],
+        )
 
-        prompt = f"""You are a Python documentation expert. Generate a high-quality docstring for the following function using {format_style.value} style.
+        return f"""You are a Python documentation expert. Generate a high-quality docstring for the following function using {format_style.value} style.
 
 Function Information:
 - Name: {docstring_info.function_name}
@@ -95,8 +104,6 @@ Function to document:
 
 Generate only the docstring content (without the triple quotes):"""
 
-        return prompt
-
     def _get_google_example(self) -> str:
         """Get Google style docstring example.
 
@@ -105,45 +112,41 @@ Generate only the docstring content (without the triple quotes):"""
         """
         return '''def calculate_area(radius: float) -> float:
     """Calculate the area of a circle.
-    
+
     Args:
         radius: The radius of the circle in metres.
-        
+
     Returns:
         The area of the circle in square metres.
-        
+
     Raises:
         ValueError: If radius is negative.
-        
+
     Example:
         >>> calculate_area(5.0)
         78.53981633974483
     """'''
 
     def _get_numpy_example(self) -> str:
-        """Get NumPy style docstring example.
-
-        Returns:
-            Example NumPy style docstring.
-        """
         return '''def calculate_area(radius: float) -> float:
-    """Calculate the area of a circle.
-    
+    """
+    Calculate the area of a circle.
+
     Parameters
     ----------
     radius : float
         The radius of the circle in metres.
-        
+
     Returns
     -------
     float
         The area of the circle in square metres.
-        
+
     Raises
     ------
     ValueError
         If radius is negative.
-        
+
     Examples
     --------
     >>> calculate_area(5.0)
@@ -151,22 +154,16 @@ Generate only the docstring content (without the triple quotes):"""
     """'''
 
     def _get_restructuredtext_example(self) -> str:
-        """Get reStructuredText style docstring example.
-
-        Returns:
-            Example reStructuredText style docstring.
-        """
         return '''def calculate_area(radius: float) -> float:
-    """Calculate the area of a circle.
-    
+    """
+    Calculate the area of a circle.
+
     :param radius: The radius of the circle in metres.
     :type radius: float
-    :return: The area of the circle in square metres.
+    :returns: The area of the circle in square metres.
     :rtype: float
     :raises ValueError: If radius is negative.
-    
     :Example:
-    
-    >>> calculate_area(5.0)
-    78.53981633974483
+        >>> calculate_area(5.0)
+        78.53981633974483
     """'''

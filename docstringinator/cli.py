@@ -2,7 +2,7 @@
 
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import typer
 from rich.console import Console
@@ -44,23 +44,26 @@ def main(
         "-k",
         help="API key for the LLM provider",
     ),
-    dry_run: bool = typer.Option(
-        False,
+    dry_run: bool = typer.Option(  # noqa: FBT001
+        False,  # noqa: FBT003
         "--dry-run",
         "-n",
         help="Preview changes without applying them",
+        is_flag=True,
     ),
-    verbose: bool = typer.Option(
-        True,
+    verbose: bool = typer.Option(  # noqa: FBT001
+        True,  # noqa: FBT003
         "--verbose",
         "-v",
         help="Enable verbose output",
+        is_flag=True,
     ),
-    quiet: bool = typer.Option(
-        False,
+    quiet: bool = typer.Option(  # noqa: FBT001
+        False,  # noqa: FBT003
         "--quiet",
         "-q",
         help="Suppress output",
+        is_flag=True,
     ),
     format_style: Optional[str] = typer.Option(
         None,
@@ -101,7 +104,7 @@ def main(
     """
     try:
         # Set up configuration overrides
-        config_overrides = {}
+        config_overrides: Dict[str, Any] = {}
         if dry_run:
             config_overrides["processing"] = {"dry_run": True}
         if not verbose or quiet:
@@ -128,26 +131,30 @@ def main(
             sys.exit(1)
 
         if target_path.is_file():
-            result = docstringinator.fix_file(str(target_path))
-            docstringinator.print_results(result)
+            file_result = docstringinator.fix_file(str(target_path))
+            docstringinator.print_results(file_result)
 
-            if not result.success:
+            if not file_result.success:
                 console.print(f"[red]Failed to process {target_path}[/red]")
                 sys.exit(1)
-            elif result.changes:
+            elif file_result.changes:
                 console.print(f"[green]Successfully processed {target_path}[/green]")
             else:
                 console.print(f"[yellow]No changes needed for {target_path}[/yellow]")
 
         elif target_path.is_dir():
-            result = docstringinator.fix_directory(str(target_path))
-            docstringinator.print_batch_results(result)
+            batch_result = docstringinator.fix_directory(str(target_path))
+            docstringinator.print_batch_results(batch_result)
 
-            if result.failed_files > 0:
-                console.print(f"[red]Failed to process {result.failed_files} files[/red]")
+            if batch_result.failed_files > 0:
+                console.print(
+                    f"[red]Failed to process {batch_result.failed_files} files[/red]",
+                )
                 sys.exit(1)
-            elif result.total_changes > 0:
-                console.print(f"[green]Successfully processed {result.successful_files} files[/green]")
+            elif batch_result.total_changes > 0:
+                console.print(
+                    f"[green]Successfully processed {batch_result.successful_files} files[/green]",
+                )
             else:
                 console.print("[yellow]No changes needed for any files[/yellow]")
 
@@ -155,8 +162,11 @@ def main(
             console.print(f"[red]Error: '{target}' is not a file or directory[/red]")
             sys.exit(1)
 
-    except Exception as e:
+    except (FileNotFoundError, ValueError, RuntimeError) as e:
         console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+    except OSError as e:
+        console.print(f"[red]System error: {e}[/red]")
         sys.exit(1)
 
 
@@ -185,8 +195,11 @@ def init(
         console.print("1. Edit the configuration file to set your API key")
         console.print("2. Run docstringinator on your Python files")
 
-    except Exception as e:
+    except (FileNotFoundError, ValueError) as e:
         console.print(f"[red]Error creating configuration file: {e}[/red]")
+        sys.exit(1)
+    except OSError as e:
+        console.print(f"[red]System error creating configuration file: {e}[/red]")
         sys.exit(1)
 
 
@@ -206,11 +219,11 @@ def info() -> None:
 
     info_text = f"""
     [bold]Docstringinator[/bold] - A Python tool for automatically fixing and improving docstrings using LLMs
-    
+
     [bold]Version:[/bold] {__version__}
     [bold]Author:[/bold] {__author__}
     [bold]Email:[/bold] {__email__}
-    
+
     [bold]Features:[/bold]
     • Automatic docstring generation for functions, classes, and modules
     • Docstring improvement with better formatting and clarity
@@ -219,10 +232,10 @@ def info() -> None:
     • Customisable formatting (Google, NumPy, reStructuredText)
     • Batch processing of entire directories
     • Dry-run mode to preview changes
-    
+
     [bold]Usage:[/bold]
     docstringinator <file_or_directory> [options]
-    
+
     [bold]Examples:[/bold]
     • docstringinator path/to/file.py
     • docstringinator path/to/directory/ --dry-run
@@ -236,11 +249,11 @@ def main_wrapper() -> None:
     """Wrapper for the main function to handle exceptions gracefully."""
     try:
         app()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, EOFError):
         console.print("\n[yellow]Operation cancelled by user[/yellow]")
         sys.exit(1)
-    except Exception as e:
-        console.print(f"\n[red]Unexpected error: {e}[/red]")
+    except OSError as e:
+        console.print(f"\n[red]System error: {e}[/red]")
         sys.exit(1)
 
 

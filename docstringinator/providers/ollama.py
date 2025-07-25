@@ -1,12 +1,12 @@
 """Ollama LLM provider for Docstringinator."""
 
-import asyncio
 from typing import Any, Dict
 
 import requests
 
-from ..models import DocstringFormat, DocstringInfo
-from .base import LLMProviderBase, LLMResponse
+from docstringinator.exceptions import APIError, DocstringinatorConnectionError
+from docstringinator.models import DocstringFormat, DocstringInfo
+from docstringinator.providers.base import LLMProviderBase, LLMResponse
 
 
 class OllamaProvider(LLMProviderBase):
@@ -19,18 +19,21 @@ class OllamaProvider(LLMProviderBase):
             config: Configuration for the provider.
         """
         super().__init__(config)
-        self.base_url = config.get("base_url", "http://localhost:11434")
         self.model = config.get("model", "llama2")
-
-        # Test connection to Ollama
+        self.base_url = config.get("ollama_base_url", "http://localhost:11434")
+        self.temperature = config.get("temperature", 0.1)
+        self.max_tokens = config.get("max_tokens", 1024)
+        self.timeout = config.get("timeout", 30)
         try:
-            response = requests.get(f"{self.base_url}/api/tags", timeout=5)
+            response = requests.get(f"{self.base_url}/api/tags", timeout=3)
             response.raise_for_status()
         except requests.RequestException as e:
-            raise ValueError(f"Cannot connect to Ollama at {self.base_url}: {e}")
+            raise DocstringinatorConnectionError(self.base_url) from e
 
-    async def generate_docstring(
-        self, docstring_info: DocstringInfo, format_style: DocstringFormat,
+    def generate_docstring(
+        self,
+        docstring_info: DocstringInfo,
+        format_style: DocstringFormat,
     ) -> LLMResponse:
         """Generate docstring using Ollama.
 
@@ -44,23 +47,17 @@ class OllamaProvider(LLMProviderBase):
         prompt = self._create_prompt(docstring_info, format_style)
 
         try:
-            # Use requests in a thread to avoid blocking
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                self._make_ollama_request,
-                prompt,
-            )
+            response = self._make_ollama_request(prompt)
 
             return LLMResponse(
                 content=response.get("response", ""),
                 model=self.model,
-                usage=response.get("usage"),
+                usage=response.get("usage") or {},
                 finish_reason=(response.get("done", True) and "stop") or "length",
             )
 
         except Exception as e:
-            raise RuntimeError(f"Ollama API error: {e}")
+            raise APIError from e
 
     def _make_ollama_request(self, prompt: str) -> Dict[str, Any]:
         """Make a request to Ollama API.
@@ -71,20 +68,17 @@ class OllamaProvider(LLMProviderBase):
         Returns:
             Response from Ollama API.
         """
+        url = f"{self.base_url}/api/generate"
         payload = {
             "model": self.model,
             "prompt": prompt,
             "stream": False,
             "options": {
                 "temperature": self.temperature,
-                "num_predict": self.max_tokens or 1000,
+                "num_predict": self.max_tokens,
             },
         }
 
-        response = requests.post(
-            f"{self.base_url}/api/generate",
-            json=payload,
-            timeout=self.timeout,
-        )
+        response = requests.post(url, json=payload, timeout=self.timeout)
         response.raise_for_status()
-        return response.json()
+        return response.json()  # type: ignore

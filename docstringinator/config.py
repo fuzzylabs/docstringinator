@@ -3,10 +3,19 @@
 from pathlib import Path
 from typing import Optional
 
+import requests
 import yaml
-from pydantic import ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from .exceptions import (
+    APIKeyRequiredError,
+    InvalidConfigurationError,
+    InvalidFileSizeError,
+    InvalidLineLengthError,
+    InvalidTemperatureError,
+    InvalidYAMLError,
+    OllamaConnectionError,
+)
 from .models import Config, LLMProvider
 
 
@@ -66,10 +75,10 @@ def load_config(config_path: Optional[str] = None) -> Config:
     config_file = Path(config_path)
     if config_file.exists():
         try:
-            with open(config_file, encoding="utf-8") as f:
+            with config_file.open(encoding="utf-8") as f:
                 config_data = yaml.safe_load(f)
         except yaml.YAMLError as e:
-            raise ValidationError(f"Invalid YAML in config file: {e}")
+            raise InvalidYAMLError(str(config_file)) from e
 
         # Merge with environment settings
         config_data = _merge_config_with_env(config_data, settings)
@@ -79,8 +88,8 @@ def load_config(config_path: Optional[str] = None) -> Config:
 
     try:
         return Config(**config_data)
-    except ValidationError as e:
-        raise ValidationError(f"Invalid configuration: {e}")
+    except Exception as e:
+        raise InvalidConfigurationError(str(config_file)) from e
 
 
 def _merge_config_with_env(config_data: dict, settings: Settings) -> dict:
@@ -140,7 +149,10 @@ def _merge_config_with_env(config_data: dict, settings: Settings) -> dict:
     if settings.include_examples and "include_examples" not in config_data["format"]:
         config_data["format"]["include_examples"] = settings.include_examples
 
-    if settings.include_type_hints and "include_type_hints" not in config_data["format"]:
+    if (
+        settings.include_type_hints
+        and "include_type_hints" not in config_data["format"]
+    ):
         config_data["format"]["include_type_hints"] = settings.include_type_hints
 
     if settings.max_line_length and "max_line_length" not in config_data["format"]:
@@ -242,50 +254,48 @@ def create_default_config(config_path: str = "docstringinator.yaml") -> None:
         },
     }
 
-    with open(config_path, "w", encoding="utf-8") as f:
-        yaml.dump(default_config, f, default_flow_style=False, indent=2)
-
-    print(f"Created default configuration file: {config_path}")
+    config_file = Path(config_path)
+    if not config_file.exists():
+        with config_file.open("w", encoding="utf-8") as f:
+            yaml.dump(default_config, f, default_flow_style=False, indent=2)
 
 
 def validate_config(config: Config) -> None:
-    """Validate configuration and check for common issues.
+    """Validate configuration settings.
 
     Args:
-        config: Configuration to validate.
+        config: Configuration object to validate.
 
     Raises:
         ValueError: If configuration is invalid.
     """
     # Check API key for providers that require it
-    if config.llm.provider in [LLMProvider.OPENAI, LLMProvider.ANTHROPIC]:
-        if not config.llm.api_key:
-            raise ValueError(
-                f"API key is required for {config.llm.provider} provider. "
-                "Set it in the configuration file or environment variable.",
-            )
+    if (
+        config.llm.provider in [LLMProvider.OPENAI, LLMProvider.ANTHROPIC]
+        and not config.llm.api_key
+    ):
+        raise APIKeyRequiredError(config.llm.provider)
 
     # Check Ollama connection if using Ollama provider
     if config.llm.provider == LLMProvider.OLLAMA:
-        import requests
+        base_url = config.llm.model_dump().get(
+            "ollama_base_url",
+            "http://localhost:11434",
+        )
         try:
-            base_url = getattr(config.llm, 'base_url', 'http://localhost:11434')
-            response = requests.get(f"{base_url}/api/tags", timeout=5)
+            response = requests.get(f"{base_url}/api/tags", timeout=3)
             response.raise_for_status()
         except requests.RequestException as e:
-            raise ValueError(
-                f"Cannot connect to Ollama at {base_url}. "
-                "Make sure Ollama is running and accessible. Error: {e}"
-            )
+            raise OllamaConnectionError(base_url) from e
 
     # Check file size limit
     if config.processing.max_file_size <= 0:
-        raise ValueError("max_file_size must be positive")
+        raise InvalidFileSizeError(config.processing.max_file_size)
 
     # Check temperature range
     if not 0.0 <= config.llm.temperature <= 2.0:
-        raise ValueError("temperature must be between 0.0 and 2.0")
+        raise InvalidTemperatureError(config.llm.temperature)
 
     # Check line length
     if config.format.max_line_length <= 0:
-        raise ValueError("max_line_length must be positive")
+        raise InvalidLineLengthError(config.format.max_line_length)

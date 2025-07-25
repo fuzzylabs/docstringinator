@@ -4,8 +4,9 @@ from typing import Any, Dict
 
 import openai
 
-from ..models import DocstringFormat, DocstringInfo
-from .base import LLMProviderBase, LLMResponse
+from docstringinator.exceptions import APIError, APIKeyRequiredError
+from docstringinator.models import DocstringFormat, DocstringInfo
+from docstringinator.providers.base import LLMProviderBase, LLMResponse
 
 
 class OpenAIProvider(LLMProviderBase):
@@ -20,12 +21,14 @@ class OpenAIProvider(LLMProviderBase):
         super().__init__(config)
         api_key = config.get("api_key")
         if not api_key:
-            raise ValueError("OpenAI API key is required")
+            raise APIKeyRequiredError
 
-        self.client = openai.AsyncOpenAI(api_key=api_key)
+        self.client = openai.OpenAI(api_key=api_key)
 
-    async def generate_docstring(
-        self, docstring_info: DocstringInfo, format_style: DocstringFormat,
+    def generate_docstring(
+        self,
+        docstring_info: DocstringInfo,
+        format_style: DocstringFormat,
     ) -> LLMResponse:
         """Generate docstring using OpenAI.
 
@@ -39,10 +42,13 @@ class OpenAIProvider(LLMProviderBase):
         prompt = self._create_prompt(docstring_info, format_style)
 
         try:
-            response = await self.client.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are a Python documentation expert."},
+                    {
+                        "role": "system",
+                        "content": "You are a Python documentation expert.",
+                    },
                     {"role": "user", "content": prompt},
                 ],
                 temperature=self.temperature,
@@ -53,9 +59,9 @@ class OpenAIProvider(LLMProviderBase):
             return LLMResponse(
                 content=response.choices[0].message.content or "",
                 model=self.model,
-                usage=response.usage.model_dump() if response.usage else None,
+                usage=response.usage.model_dump() if response.usage else {},
                 finish_reason=response.choices[0].finish_reason,
             )
 
         except Exception as e:
-            raise RuntimeError(f"OpenAI API error: {e}")
+            raise APIError from e

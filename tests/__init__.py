@@ -1,1 +1,1 @@
-"""Test suite for Docstringinator.""" 
+"""Test suite for Docstringinator."""

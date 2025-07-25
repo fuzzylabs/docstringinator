@@ -103,4 +103,4 @@ info:
 
 # Show version
 version:
-	python -m docstringinator.cli version 
+	python -m docstringinator.cli version

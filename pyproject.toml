@@ -93,6 +93,8 @@ dev-dependencies = [
     "sphinx-rtd-theme>=1.3.0",
     "myst-parser>=2.0.0",
     "build>=1.0.0",
+    "types-requests>=2.32.0.20241016",
+    "types-pyyaml>=6.0.12.20241230",
 ]
 
 [project.scripts]
@@ -137,7 +139,7 @@ line_length = 88
 known_first_party = ["docstringinator"]
 
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.9"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -150,6 +152,10 @@ warn_unused_ignores = true
 warn_no_return = true
 warn_unreachable = true
 strict_equality = true
+# Ignore abstract class instantiation in factory
+[[tool.mypy.overrides]]
+module = "docstringinator.providers.factory"
+disable_error_code = ["abstract"]
 
 [[tool.mypy.overrides]]
 module = [
@@ -165,6 +171,13 @@ module = [
     "toml.*",
 ]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = false
+disallow_untyped_decorators = false
 
 [tool.pytest.ini_options]
 minversion = "7.0"
@@ -206,6 +219,8 @@ exclude_lines = [
 [tool.ruff]
 target-version = "py38"
 line-length = 88
+
+[tool.ruff.lint]
 select = [
     "E",  # pycodestyle errors
     "W",  # pycodestyle warnings
@@ -248,9 +263,20 @@ ignore = [
     "S607",  # starting a process with a partial executable path
 ]
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
-"tests/**/*" = ["B011", "S101", "S603", "S607"]
+"tests/**/*" = [
+    "B011",  # do not call setattr with a constant attribute value
+    "S101",  # use of assert detected
+    "S603",  # subprocess call - check for execution of untrusted input
+    "S607",  # starting a process with a partial executable path
+    "ARG002",  # unused method argument (needed for mock decorators)
+    "FBT001",  # boolean-typed positional argument in function definition
+    "FBT003",  # boolean positional value in function call
+    "PERF203",  # try-except within a loop (acceptable in tests)
+    "BLE001",  # blind exception catching (acceptable in tests)
+    "TRY400",  # use logging.exception instead of logging.error (acceptable in tests)
+]
 "**/migrations/**" = ["E501", "F401"]
 
 [tool.sphinx]
@@ -277,4 +303,4 @@ navigation_depth = 4
 collapse_navigation = false
 
 [tool.sphinx.intersphinx_mapping]
-python = ["https://docs.python.org/3", ""] 
+python = ["https://docs.python.org/3", ""]

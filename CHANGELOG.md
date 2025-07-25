@@ -39,4 +39,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Google, NumPy, and reStructuredText docstring formats
 - Command-line interface
 - Configuration file support
-- Pre-commit hook integration 
+- Pre-commit hook integration

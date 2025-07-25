@@ -1,5 +1,5 @@
 # Example configuration for using Ollama with Docstringinator
-# 
+#
 # 1. Install Ollama: https://ollama.ai/download
 # 2. Pull a model: ollama pull llama2
 # 3. Start Ollama: ollama serve
@@ -38,4 +38,4 @@ output:
   verbose: true
   show_diff: true
   create_backup: true
-  output_format: "text" 
+  output_format: "text"

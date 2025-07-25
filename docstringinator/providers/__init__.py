@@ -5,7 +5,7 @@ from .base import LLMProviderBase, LLMResponse
 from .factory import create_llm_provider
 from .ollama import OllamaProvider
 from .openai import OpenAIProvider
-from .utils import generate_docstring, generate_docstring_async
+from .utils import generate_docstring
 
 __all__ = [
     "AnthropicProvider",
@@ -15,5 +15,4 @@ __all__ = [
     "OpenAIProvider",
     "create_llm_provider",
     "generate_docstring",
-    "generate_docstring_async",
 ]

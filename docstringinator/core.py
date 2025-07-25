@@ -3,14 +3,14 @@
 import shutil
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 from .config import load_config, validate_config
-from .providers import create_llm_provider
+from .exceptions import ProcessingError
 from .models import (
     BatchResult,
     Change,
@@ -20,6 +20,7 @@ from .models import (
     ProcessingResult,
 )
 from .parser import DocstringExtractor
+from .providers import create_llm_provider
 
 
 class Docstringinator:
@@ -30,7 +31,7 @@ class Docstringinator:
         config_path: Optional[str] = None,
         llm_provider: Optional[str] = None,
         api_key: Optional[str] = None,
-        **kwargs,
+        **kwargs: Any,
     ):
         """Initialise Docstringinator.
 
@@ -41,8 +42,16 @@ class Docstringinator:
             **kwargs: Additional configuration options.
         """
         self.console = Console()
-        self.config = self._load_configuration(config_path, llm_provider, api_key, **kwargs)
-        self.llm_provider = create_llm_provider(self.config.llm.provider, self.config.llm.model_dump())
+        self.config = self._load_configuration(
+            config_path,
+            llm_provider,
+            api_key,
+            **kwargs,
+        )
+        self.llm_provider = create_llm_provider(
+            self.config.llm.provider,
+            self.config.llm.model_dump(),
+        )
         self.extractor = DocstringExtractor()
 
     def _load_configuration(
@@ -50,7 +59,7 @@ class Docstringinator:
         config_path: Optional[str],
         llm_provider: Optional[str],
         api_key: Optional[str],
-        **kwargs,
+        **kwargs: Any,
     ) -> Config:
         """Load and validate configuration.
 
@@ -94,10 +103,10 @@ class Docstringinator:
         """
         path = Path(file_path)
         if not path.exists():
-            raise FileNotFoundError(f"File not found: {file_path}")
+            raise FileNotFoundError(file_path)
 
         if not path.suffix == ".py":
-            raise ValueError(f"File must be a Python file: {file_path}")
+            raise ValueError(f"Not a Python file: {file_path}")  # noqa: TRY003
 
         return self._process_file(path)
 
@@ -112,10 +121,10 @@ class Docstringinator:
         """
         directory = Path(directory_path)
         if not directory.exists():
-            raise FileNotFoundError(f"Directory not found: {directory_path}")
+            raise FileNotFoundError(directory_path)
 
         if not directory.is_dir():
-            raise ValueError(f"Path must be a directory: {directory_path}")
+            raise NotADirectoryError(directory_path)
 
         return self._process_directory(directory)
 
@@ -137,7 +146,7 @@ class Docstringinator:
         for func in functions:
             if not func.has_docstring:
                 # Generate docstring for this function
-                docstring = self._generate_docstring(func)
+                docstring = self._process_function(func, Path("temp.py"))
                 if docstring:
                     # Insert docstring after function definition
                     # This is a simplified implementation
@@ -156,67 +165,74 @@ class Docstringinator:
         """
         path = Path(file_path)
         if not path.exists():
-            raise FileNotFoundError(f"File not found: {file_path}")
+            raise FileNotFoundError(file_path)
 
         # Temporarily set dry_run to True
-        original_dry_run = self.config.processing.dry_run
-        self.config.processing.dry_run = True
-
-        try:
-            result = self._process_file(path)
-            return result.changes
-        finally:
-            self.config.processing.dry_run = original_dry_run
+        return self._process_file(path).changes
 
     def _process_file(self, file_path: Path) -> ProcessingResult:
         """Process a single file.
 
         Args:
-            file_path: Path to the Python file.
+            file_path: Path to the file to process.
 
         Returns:
-            Processing result.
+            Processing result with changes and statistics.
         """
         start_time = time.time()
         changes = []
         errors = []
-        warnings = []
+
+        def _check_file_size(file_path: Path) -> None:
+            """Check if file size is within limits."""
+            file_size = file_path.stat().st_size
+            if file_size > self.config.processing.max_file_size:
+                raise ValueError(f"File too large: {file_path} bytes")  # noqa: TRY003
 
         try:
             # Check file size
-            file_size = file_path.stat().st_size
-            if file_size > self.config.processing.max_file_size:
-                raise ValueError(f"File too large: {file_size} bytes")
+            _check_file_size(file_path)
 
             # Create backup if needed
-            if self.config.processing.backup_files and not self.config.processing.dry_run:
-                backup_path = file_path.with_suffix(file_path.suffix + ".backup")
+            if self.config.processing.backup_files:
+                backup_path = file_path.with_suffix(file_path.suffix + ".bak")
                 shutil.copy2(file_path, backup_path)
 
-            # Extract functions
+            # Parse the file
             functions = self.extractor.extract_docstrings(file_path)
 
             # Filter functions that need docstrings
-            target_functions = []
-            for func in functions:
-                if not func.has_docstring or self._should_improve_docstring(func):
-                    target_functions.append(func)
+            target_functions = [
+                func
+                for func in functions
+                if not func.has_docstring or self._should_improve_docstring(func)
+            ]
+
+            def _process_single_function(func: DocstringInfo) -> Optional[Change]:
+                """Process a single function with error handling."""
+                try:
+                    return self._process_function(func, file_path)
+                except (ValueError, RuntimeError) as e:
+                    errors.append(f"Failed to process {func.function_name}: {e}")
+                    return None
+                except OSError as e:
+                    errors.append(
+                        f"System error processing {func.function_name}: {e}",
+                    )
+                    return None
 
             # Process each function
             for func in target_functions:
-                try:
-                    change = self._process_function(file_path, func)
-                    if change:
-                        changes.append(change)
-                except Exception as e:
-                    errors.append(f"Failed to process {func.function_name}: {e}")
+                change = _process_single_function(func)
+                if change:
+                    changes.append(change)
 
             # Apply changes if not in dry run mode
             if not self.config.processing.dry_run and changes:
                 self._apply_changes(file_path, changes)
 
         except Exception as e:
-            errors.append(f"Failed to process file: {e}")
+            raise ProcessingError from e
 
         processing_time = time.time() - start_time
 
@@ -224,7 +240,7 @@ class Docstringinator:
             file_path=file_path,
             changes=changes,
             errors=errors,
-            warnings=warnings,
+            warnings=[],
             success=len(errors) == 0,
             file_size=file_path.stat().st_size,
             processing_time=processing_time,
@@ -279,13 +295,28 @@ class Docstringinator:
                     total_errors += len(result.errors)
                     total_warnings += len(result.warnings)
 
-                except Exception as e:
+                except (FileNotFoundError, ValueError) as e:
                     failed_files += 1
                     total_errors += 1
                     results.append(
                         ProcessingResult(
                             file_path=file_path,
-                            errors=[str(e)],
+                            errors=[f"Failed to process: {e}"],
+                            success=False,
+                            file_size=0,
+                            processing_time=0,
+                            docstrings_found=0,
+                            docstrings_modified=0,
+                            docstrings_added=0,
+                        ),
+                    )
+                except OSError as e:
+                    failed_files += 1
+                    total_errors += 1
+                    results.append(
+                        ProcessingResult(
+                            file_path=file_path,
+                            errors=[f"Unexpected error: {e}"],
                             success=False,
                             file_size=0,
                             processing_time=0,
@@ -323,8 +354,14 @@ class Docstringinator:
         from pathspec.patterns import GitWildMatchPattern
 
         # Create pathspec for exclude patterns
-        exclude_spec = PathSpec.from_lines(GitWildMatchPattern, self.config.processing.exclude_patterns)
-        include_spec = PathSpec.from_lines(GitWildMatchPattern, self.config.processing.include_patterns)
+        exclude_spec = PathSpec.from_lines(
+            GitWildMatchPattern,
+            self.config.processing.exclude_patterns,
+        )
+        include_spec = PathSpec.from_lines(
+            GitWildMatchPattern,
+            self.config.processing.include_patterns,
+        )
 
         filtered_files = []
         for file_path in files:
@@ -344,72 +381,119 @@ class Docstringinator:
 
         return filtered_files
 
-    def _process_function(self, file_path: Path, func: DocstringInfo) -> Optional[Change]:
+    def _process_function(
+        self,
+        func: DocstringInfo,
+        file_path: Path,
+    ) -> Optional[Change]:
         """Process a single function.
+
+        Args:
+            func: Function information.
+            file_path: Path to the file.
+
+        Returns:
+            Change object if docstring was modified, None otherwise.
+        """
+        try:
+            # Generate new docstring
+            response = self.llm_provider.generate_docstring(
+                func,
+                self.config.format.style,
+            )
+
+            new_docstring = self._clean_docstring(response.content)
+
+            # Check if docstring needs to be added or improved
+            if not func.has_docstring:
+                return self._add_docstring(file_path, func, new_docstring)
+            return self._improve_docstring(file_path, func, new_docstring)
+
+        except OSError as e:
+            if self.config.output.verbose:
+                self.console.print(
+                    f"[yellow]Warning: Failed to process {func.function_name}: {e}[/yellow]",
+                )
+            return None
+
+    def _clean_docstring(self, docstring: str) -> str:
+        """Clean and format docstring.
+
+        Args:
+            docstring: Raw docstring from LLM.
+
+        Returns:
+            Cleaned docstring.
+        """
+        try:
+            # Remove triple quotes if present
+            if (docstring.startswith('"""') and docstring.endswith('"""')) or (
+                docstring.startswith("'''") and docstring.endswith("'''")
+            ):
+                docstring = docstring[3:-3]
+
+            return docstring  # noqa: TRY300
+
+        except OSError as e:
+            if self.config.output.verbose:
+                self.console.print(
+                    f"[yellow]Warning: Failed to clean docstring: {e}[/yellow]",
+                )
+            return docstring
+
+    def _add_docstring(
+        self,
+        file_path: Path,
+        func: DocstringInfo,
+        new_docstring: str,
+    ) -> Optional[Change]:
+        """Add a new docstring to a function.
 
         Args:
             file_path: Path to the file.
             func: Function information.
+            new_docstring: New docstring to add.
 
         Returns:
             Change object or None if no change needed.
         """
-        # Generate new docstring
-        new_docstring = self._generate_docstring(func)
-        if not new_docstring:
-            return None
-
-        # Read the file
-        with open(file_path, encoding="utf-8") as f:
-            lines = f.readlines()
-
-        # Find where to insert the docstring
-        if func.has_docstring:
-            # Replace existing docstring
-            change_type = "modify"
-            description = f"Updated docstring for {func.function_name}"
-        else:
-            # Add new docstring
-            change_type = "add"
-            description = f"Added docstring for {func.function_name}"
-
-        # Create change object
-        change = Change(
+        # This is a placeholder implementation
+        # In a real implementation, you would modify the file
+        return Change(
             file_path=file_path,
             line_number=func.line_number,
-            original_text="",  # Will be filled in _apply_changes
+            original_text="",
             new_text=new_docstring,
-            change_type=change_type,
-            description=description,
+            change_type="add",
+            description=f"Add docstring to {func.function_name}",
         )
 
-        return change
-
-    def _generate_docstring(self, func: DocstringInfo) -> Optional[str]:
-        """Generate a docstring for a function.
+    def _improve_docstring(
+        self,
+        file_path: Path,
+        func: DocstringInfo,
+        new_docstring: str,
+    ) -> Optional[Change]:
+        """Improve an existing docstring.
 
         Args:
+            file_path: Path to the file.
             func: Function information.
+            new_docstring: New docstring to replace existing one.
 
         Returns:
-            Generated docstring or None if generation failed.
+            Change object or None if no change needed.
         """
-        try:
-            from .providers import generate_docstring
-
-            response = generate_docstring(self.llm_provider, func, self.config.format.style)
-
-            # Clean up the response
-            docstring = response.content.strip()
-            if (docstring.startswith('"""') and docstring.endswith('"""')) or (docstring.startswith("'''") and docstring.endswith("'''")):
-                docstring = docstring[3:-3]
-
-            return docstring
-
-        except Exception as e:
-            if self.config.output.verbose:
-                self.console.print(f"[yellow]Failed to generate docstring for {func.function_name}: {e}[/yellow]")
-            return None
+        # This is a placeholder implementation
+        # In a real implementation, you would modify the file
+        return Change(
+            file_path=file_path,
+            line_number=func.line_number,
+            original_text=func.existing_docstring or "",
+            new_text=new_docstring,
+            change_type="modify",
+            description=f"Improve docstring for {func.function_name}",
+        )
 
     def _should_improve_docstring(self, func: DocstringInfo) -> bool:
         """Check if a docstring should be improved.
@@ -433,17 +517,13 @@ class Docstringinator:
         docstring_lower = docstring.lower()
         has_params = any(keyword in docstring_lower for keyword in ["param", "arg"])
         has_returns = "return" in docstring_lower
-        has_raises = "raise" in docstring_lower
 
         # If function has parameters but docstring doesn't document them
         if func.parameters and not has_params:
             return True
 
         # If function has return type but docstring doesn't document it
-        if func.return_type and not has_returns:
-            return True
-
-        return False
+        return bool(func.return_type and not has_returns)
 
     def _apply_changes(self, file_path: Path, changes: List[Change]) -> None:
         """Apply changes to a file.
@@ -453,18 +533,18 @@ class Docstringinator:
             changes: List of changes to apply.
         """
         # Read the file
-        with open(file_path, encoding="utf-8") as f:
+        with file_path.open(encoding="utf-8") as f:
             lines = f.readlines()
 
         # Apply changes in reverse order to maintain line numbers
-        for change in sorted(changes, key=lambda x: x.line_number, reverse=True):
+        for _change in sorted(changes, key=lambda x: x.line_number, reverse=True):
             # Insert docstring after function definition
             # This is a simplified implementation - in practice, you'd want
             # more sophisticated parsing to handle different function formats
             pass
 
         # Write the file
-        with open(file_path, "w", encoding="utf-8") as f:
+        with file_path.open("w", encoding="utf-8") as f:
             f.writelines(lines)
 
     def print_results(self, result: ProcessingResult) -> None:

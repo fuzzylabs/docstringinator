@@ -212,7 +212,7 @@ class TestDocstringinator:
     def test_fix_file_with_invalid_path(self):
         """Test that invalid file paths raise appropriate errors."""
         docstringinator = Docstringinator()
-        
+
         with pytest.raises(FileNotFoundError):
             docstringinator.fix_file("nonexistent_file.py")
 ```
@@ -288,4 +288,4 @@ When creating a pull request, please include:
 
 By contributing to Docstringinator, you agree that your contributions will be licensed under the MIT License.
 
-Thank you for contributing to Docstringinator! 🚀 
+Thank you for contributing to Docstringinator! 🚀

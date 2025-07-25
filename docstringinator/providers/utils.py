@@ -1,38 +1,22 @@
 """Utility functions for LLM providers."""
 
-import asyncio
-
-from ..models import DocstringFormat, DocstringInfo
-from .base import LLMProviderBase, LLMResponse
-
-
-async def generate_docstring_async(
-    provider: LLMProviderBase, docstring_info: DocstringInfo, format_style: DocstringFormat,
-) -> LLMResponse:
-    """Generate a docstring asynchronously.
-
-    Args:
-        provider: LLM provider instance.
-        docstring_info: Information about the function.
-        format_style: The docstring format to use.
-
-    Returns:
-        Generated docstring response.
-    """
-    return await provider.generate_docstring(docstring_info, format_style)
+from docstringinator.models import DocstringFormat, DocstringInfo
+from docstringinator.providers.base import LLMProviderBase, LLMResponse
 
 
 def generate_docstring(
-    provider: LLMProviderBase, docstring_info: DocstringInfo, format_style: DocstringFormat,
+    provider: LLMProviderBase,
+    docstring_info: DocstringInfo,
+    format_style: DocstringFormat,
 ) -> LLMResponse:
-    """Generate a docstring synchronously.
+    """Generate docstring using the provided provider.
 
     Args:
-        provider: LLM provider instance.
+        provider: The LLM provider to use.
         docstring_info: Information about the function.
         format_style: The docstring format to use.
 
     Returns:
         Generated docstring response.
     """
-    return asyncio.run(generate_docstring_async(provider, docstring_info, format_style))
+    return provider.generate_docstring(docstring_info, format_style)

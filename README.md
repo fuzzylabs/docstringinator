@@ -185,16 +185,16 @@ Docstringinator supports multiple docstring formats:
 ```python
 def calculate_area(radius: float) -> float:
     """Calculate the area of a circle.
-    
+
     Args:
         radius: The radius of the circle in metres.
-        
+
     Returns:
         The area of the circle in square metres.
-        
+
     Raises:
         ValueError: If radius is negative.
-        
+
     Example:
         >>> calculate_area(5.0)
         78.53981633974483
@@ -205,22 +205,22 @@ def calculate_area(radius: float) -> float:
 ```python
 def calculate_area(radius: float) -> float:
     """Calculate the area of a circle.
-    
+
     Parameters
     ----------
     radius : float
         The radius of the circle in metres.
-        
+
     Returns
     -------
     float
         The area of the circle in square metres.
-        
+
     Raises
     ------
     ValueError
         If radius is negative.
-        
+
     Examples
     --------
     >>> calculate_area(5.0)
@@ -243,7 +243,7 @@ class Docstringinator:
         **kwargs
     ):
         """Initialise the Docstringinator.
-        
+
         Args:
             llm_provider: The LLM provider to use.
             config_path: Path to configuration file.
@@ -346,4 +346,4 @@ See [CHANGELOG.md](CHANGELOG.md) for a list of changes and version history.
 - [ ] Advanced docstring templates
 - [ ] Multi-language support
 - [ ] Performance optimisations
-- [ ] Web interface for configuration 
+- [ ] Web interface for configuration

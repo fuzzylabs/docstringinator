@@ -2,19 +2,20 @@
 
 import ast
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
+from .exceptions import ParseError
 from .models import DocstringInfo
 
 
 class PythonParser:
     """Parser for Python code to extract function information."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialise the parser."""
         self.module_name = ""
 
-    def parse_file(self, file_path: Path) -> List[DocstringInfo]:
+    def parse_file(self, file_path: str) -> List[DocstringInfo]:
         """Parse a Python file and extract function information.
 
         Args:
@@ -24,35 +25,42 @@ class PythonParser:
             List of function information objects.
         """
         try:
-            with open(file_path, encoding="utf-8") as f:
+            with Path(file_path).open(encoding="utf-8") as f:
                 content = f.read()
 
-            self.module_name = file_path.stem
+            self.module_name = Path(file_path).stem
             tree = ast.parse(content)
+            self._build_parent_relationships(tree)
             return self._extract_functions(tree, content)
 
         except Exception as e:
-            raise RuntimeError(f"Failed to parse {file_path}: {e}")
+            raise ParseError from e
 
-    def parse_string(self, code: str, module_name: str = "module") -> List[DocstringInfo]:
+    def parse_string(
+        self,
+        code: str,
+    ) -> List[DocstringInfo]:
         """Parse Python code string and extract function information.
 
         Args:
             code: Python code as string.
-            module_name: Name of the module.
 
         Returns:
             List of function information objects.
         """
         try:
-            self.module_name = module_name
             tree = ast.parse(code)
+            self._build_parent_relationships(tree)
             return self._extract_functions(tree, code)
 
         except Exception as e:
-            raise RuntimeError(f"Failed to parse code: {e}")
+            raise ParseError from e
 
-    def _extract_functions(self, tree: ast.AST, source_code: str) -> List[DocstringInfo]:
+    def _extract_functions(
+        self,
+        tree: ast.AST,
+        source_code: str,
+    ) -> List[DocstringInfo]:
         """Extract function information from AST.
 
         Args:
@@ -76,19 +84,27 @@ class PythonParser:
 
         return functions
 
-    def _build_parent_relationships(self, node: ast.AST, parent: Optional[ast.AST] = None) -> None:
+    def _build_parent_relationships(
+        self,
+        node: ast.AST,
+        parent: Optional[ast.AST] = None,
+    ) -> None:
         """Build parent-child relationships in the AST.
 
         Args:
             node: Current AST node.
             parent: Parent AST node.
         """
-        node.parent = parent
+        node.parent = parent  # type: ignore[attr-defined]
 
         for child in ast.iter_child_nodes(node):
             self._build_parent_relationships(child, node)
 
-    def _extract_function_info(self, node: ast.FunctionDef, lines: List[str]) -> Optional[DocstringInfo]:
+    def _extract_function_info(
+        self,
+        node: Union[ast.FunctionDef, ast.AsyncFunctionDef],
+        lines: List[str],
+    ) -> Optional[DocstringInfo]:
         """Extract information about a single function.
 
         Args:
@@ -118,7 +134,7 @@ class PythonParser:
         return_type = self._get_return_type(node)
 
         # Check for existing docstring
-        existing_docstring = self._extract_existing_docstring(node, lines)
+        existing_docstring = self._extract_existing_docstring(node)
 
         # Get line numbers
         line_number = node.lineno
@@ -139,7 +155,10 @@ class PythonParser:
             parameters=parameters,
         )
 
-    def _get_class_name(self, node: ast.FunctionDef) -> Optional[str]:
+    def _get_class_name(
+        self,
+        node: Union[ast.FunctionDef, ast.AsyncFunctionDef],
+    ) -> Optional[str]:
         """Get the name of the class if this function is a method.
 
         Args:
@@ -155,7 +174,11 @@ class PythonParser:
             parent = getattr(parent, "parent", None)
         return None
 
-    def _get_function_signature(self, node: ast.FunctionDef, lines: List[str]) -> str:
+    def _get_function_signature(
+        self,
+        node: Union[ast.FunctionDef, ast.AsyncFunctionDef],
+        lines: List[str],
+    ) -> str:
         """Extract the function signature as a string.
 
         Args:
@@ -175,7 +198,10 @@ class PythonParser:
 
         return line[:end_pos].strip()
 
-    def _extract_parameters(self, node: ast.FunctionDef) -> List[Dict[str, Any]]:
+    def _extract_parameters(
+        self,
+        node: Union[ast.FunctionDef, ast.AsyncFunctionDef],
+    ) -> List[Dict[str, Any]]:
         """Extract function parameters.
 
         Args:
@@ -197,32 +223,40 @@ class PythonParser:
             # Check if parameter has a default value
             param_index = node.args.args.index(arg)
             if param_index >= len(node.args.args) - len(node.args.defaults):
-                default_index = param_index - (len(node.args.args) - len(node.args.defaults))
+                default_index = param_index - (
+                    len(node.args.args) - len(node.args.defaults)
+                )
                 if default_index >= 0:
-                    param_info["default"] = self._get_default_value(node.args.defaults[default_index])
+                    param_info["default"] = self._get_default_value(
+                        node.args.defaults[default_index],
+                    )
                     param_info["required"] = False
 
             parameters.append(param_info)
 
         # Handle *args
         if node.args.vararg:
-            parameters.append({
-                "name": node.args.vararg.arg,
-                "type": "Any",
-                "default": None,
-                "required": False,
-                "vararg": True,
-            })
+            parameters.append(
+                {
+                    "name": node.args.vararg.arg,
+                    "type": "Any",
+                    "default": None,
+                    "required": False,
+                    "vararg": True,
+                },
+            )
 
         # Handle **kwargs
         if node.args.kwarg:
-            parameters.append({
-                "name": node.args.kwarg.arg,
-                "type": "Any",
-                "default": None,
-                "required": False,
-                "kwarg": True,
-            })
+            parameters.append(
+                {
+                    "name": node.args.kwarg.arg,
+                    "type": "Any",
+                    "default": None,
+                    "required": False,
+                    "kwarg": True,
+                },
+            )
 
         return parameters
 
@@ -251,7 +285,10 @@ class PythonParser:
         """
         return ast.unparse(default)
 
-    def _get_return_type(self, node: ast.FunctionDef) -> Optional[str]:
+    def _get_return_type(
+        self,
+        node: Union[ast.FunctionDef, ast.AsyncFunctionDef],
+    ) -> Optional[str]:
         """Get the return type annotation.
 
         Args:
@@ -265,28 +302,26 @@ class PythonParser:
 
         return ast.unparse(node.returns)
 
-    def _extract_existing_docstring(self, node: ast.FunctionDef, lines: List[str]) -> Optional[str]:
-        """Extract existing docstring from function.
-
-        Args:
-            node: Function definition AST node.
-            lines: Source code lines.
-
-        Returns:
-            Existing docstring or None.
-        """
-        # Look for docstring in the function body
-        if not node.body:
-            return None
-
-        first_stmt = node.body[0]
-        if isinstance(first_stmt, ast.Expr) and isinstance(first_stmt.value, ast.Constant):
-            if isinstance(first_stmt.value.value, str):
+    def _extract_existing_docstring(
+        self,
+        node: Union[ast.FunctionDef, ast.AsyncFunctionDef],
+    ) -> Optional[str]:
+        """Extract existing docstring from function."""
+        if node.body:
+            first_stmt = node.body[0]
+            if (
+                isinstance(first_stmt, ast.Expr)
+                and isinstance(first_stmt.value, ast.Constant)
+                and isinstance(first_stmt.value.value, str)
+            ):
                 return first_stmt.value.value
-
         return None
 
-    def _get_function_end_line(self, node: ast.FunctionDef, lines: List[str]) -> int:
+    def _get_function_end_line(
+        self,
+        node: Union[ast.FunctionDef, ast.AsyncFunctionDef],
+        lines: List[str],
+    ) -> int:
         """Get the end line number of the function.
 
         Args:
@@ -301,7 +336,7 @@ class PythonParser:
 
         for i, line in enumerate(lines[start_line:], start_line + 1):
             stripped = line.strip()
-            if stripped.startswith("def ") or stripped.startswith("class "):
+            if stripped.startswith(("def ", "class ")):
                 return i - 1
 
         return len(lines)
@@ -310,7 +345,7 @@ class PythonParser:
 class DocstringExtractor:
     """Extract and manipulate docstrings in Python code."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialise the extractor."""
         self.parser = PythonParser()
 
@@ -323,7 +358,7 @@ class DocstringExtractor:
         Returns:
             List of docstring information objects.
         """
-        return self.parser.parse_file(file_path)
+        return self.parser.parse_file(str(file_path))
 
     def find_missing_docstrings(self, file_path: Path) -> List[DocstringInfo]:
         """Find functions that are missing docstrings.
@@ -355,7 +390,10 @@ class DocstringExtractor:
                 docstring = func.existing_docstring.strip()
                 if len(docstring) < 20:  # Very short docstring
                     poor_docstrings.append(func)
-                elif not any(keyword in docstring.lower() for keyword in ["param", "arg", "return", "raises"]):
+                elif not any(
+                    keyword in docstring.lower()
+                    for keyword in ["param", "arg", "return", "raises"]
+                ):
                     # Missing key documentation elements
                     poor_docstrings.append(func)
 
@@ -375,7 +413,7 @@ class DocstringExtractor:
 
         for func in functions:
             if func.function_name == function_name:
-                with open(file_path, encoding="utf-8") as f:
+                with Path(file_path).open(encoding="utf-8") as f:
                     lines = f.readlines()
 
                 # Extract the function code
