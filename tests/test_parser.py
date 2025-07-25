@@ -318,3 +318,237 @@ def sample_function():
             assert code is None
         finally:
             temp_file.unlink(missing_ok=True)
+
+
+class TestDocstringPlacement:
+    """Test docstring placement functionality."""
+
+    def test_simple_function_line_numbers(self):
+        """Test that parser returns correct line numbers for simple functions."""
+        parser = PythonParser()
+        code = """def simple_function():
+    return True
+
+def another_function():
+    return False
+"""
+        functions = parser.parse_string(code)
+
+        # Check that parser returns correct line numbers
+        assert functions[0].function_name == "simple_function"
+        assert functions[0].line_number == 1  # Should be line 1 (where colon is)
+
+        assert functions[1].function_name == "another_function"
+        assert functions[1].line_number == 4  # Should be line 4 (where colon is)
+
+    def test_multi_line_function_line_numbers(self):
+        """Test that parser returns correct line numbers for multi-line functions."""
+        parser = PythonParser()
+        code = """def multi_line_function(
+    param1: str,
+    param2: int = 10,
+    param3: list = None
+) -> dict:
+    return {"param1": param1, "param2": param2, "param3": param3}
+"""
+        functions = parser.parse_string(code)
+
+        # Check that parser returns correct line number for multi-line function
+        assert functions[0].function_name == "multi_line_function"
+        assert functions[0].line_number == 5  # Should be line 5 (where colon is)
+
+    def test_complex_function_line_numbers(self):
+        """Test that parser returns correct line numbers for complex functions."""
+        parser = PythonParser()
+        code = """def very_long_function_signature(
+    first_parameter: str,
+    second_parameter: int,
+    third_parameter: list,
+    fourth_parameter: dict,
+    fifth_parameter: bool = True,
+    sixth_parameter: float = 0.0
+) -> tuple:
+    return (first_parameter, second_parameter, third_parameter)
+"""
+        functions = parser.parse_string(code)
+
+        # Check that parser returns correct line number for complex function
+        assert functions[0].function_name == "very_long_function_signature"
+        assert functions[0].line_number == 8  # Should be line 8 (where colon is)
+
+    def test_class_method_line_numbers(self):
+        """Test that parser returns correct line numbers for class methods."""
+        parser = PythonParser()
+        code = """class TestClass:
+    def __init__(self, value: int = 0):
+        self.value = value
+
+    def method_with_multi_line_signature(
+        self,
+        param1: str,
+        param2: int,
+        param3: list = None
+    ) -> str:
+        return f"{param1}: {param2}"
+"""
+        functions = parser.parse_string(code)
+
+        # Check that parser returns correct line numbers for class methods
+        assert functions[0].function_name == "__init__"
+        assert functions[0].line_number == 2  # Should be line 2 (where colon is)
+
+        assert functions[1].function_name == "method_with_multi_line_signature"
+        assert functions[1].line_number == 10  # Should be line 10 (where colon is)
+
+    def test_multiple_functions_mixed_types(self):
+        """Test that parser handles multiple functions of different types correctly."""
+        parser = PythonParser()
+        code = """def simple_function():
+    return True
+
+def multi_line_function(
+    param1: str,
+    param2: int = 10,
+    param3: list = None
+) -> dict:
+    return {"param1": param1, "param2": param2, "param3": param3}
+
+def complex_function(
+    first_param: str,
+    second_param: int,
+    third_param: list,
+    fourth_param: dict,
+    fifth_param: bool = True,
+    sixth_param: float = 0.0
+) -> tuple:
+    return (first_param, second_param, third_param)
+
+class TestClass:
+    def __init__(self, value: int = 0):
+        self.value = value
+
+    def method_with_params(
+        self,
+        param1: str,
+        param2: int,
+        param3: list = None
+    ) -> str:
+        return f"{param1}: {param2}"
+
+def final_function():
+    return "done"
+"""
+        functions = parser.parse_string(code)
+
+        # Check that all functions are parsed correctly
+        assert len(functions) == 6
+
+        # Check simple function
+        simple_func = next(f for f in functions if f.function_name == "simple_function")
+        assert simple_func.line_number == 1
+
+        # Check multi-line function
+        multi_func = next(
+            f for f in functions if f.function_name == "multi_line_function"
+        )
+        assert multi_func.line_number == 8
+
+        # Check complex function
+        complex_func = next(
+            f for f in functions if f.function_name == "complex_function"
+        )
+        assert complex_func.line_number == 18
+
+        # Check class methods
+        init_func = next(f for f in functions if f.function_name == "__init__")
+        assert init_func.line_number == 22
+        assert init_func.class_name == "TestClass"
+
+        method_func = next(
+            f for f in functions if f.function_name == "method_with_params"
+        )
+        assert method_func.line_number == 30
+        assert method_func.class_name == "TestClass"
+
+        # Check final function
+        final_func = next(f for f in functions if f.function_name == "final_function")
+        assert final_func.line_number == 33
+
+    def test_function_with_comments_and_whitespace(self):
+        """Test that parser handles functions with comments and whitespace correctly."""
+        parser = PythonParser()
+        code = """# This is a comment
+def function_with_comments(
+    # Parameter comment
+    param1: str,
+    param2: int = 10,  # Default value comment
+    param3: list = None
+) -> dict:  # Return type comment
+    # Function body comment
+    return {"param1": param1, "param2": param2, "param3": param3}
+
+# Another comment
+def another_function():
+    return False
+"""
+        functions = parser.parse_string(code)
+
+        # Check that functions are parsed correctly despite comments
+        assert len(functions) == 2
+
+        # Check first function
+        first_func = next(
+            f for f in functions if f.function_name == "function_with_comments"
+        )
+        assert first_func.line_number == 7  # Where the colon is
+
+        # Check second function
+        second_func = next(
+            f for f in functions if f.function_name == "another_function"
+        )
+        assert second_func.line_number == 12  # Where the colon is
+
+    def test_nested_functions_and_classes(self):
+        """Test that parser handles nested functions and classes correctly."""
+        parser = PythonParser()
+        code = """def outer_function():
+    def inner_function():
+        return "inner"
+    return "outer"
+
+class OuterClass:
+    def outer_method(self):
+        def inner_method():
+            return "inner"
+        return "outer"
+
+def standalone_function():
+    return "standalone"
+"""
+        functions = parser.parse_string(code)
+
+        # All functions should be parsed (including nested ones)
+        assert len(functions) == 5
+
+        # Check outer function
+        outer_func = next(f for f in functions if f.function_name == "outer_function")
+        assert outer_func.line_number == 1
+
+        # Check inner function (nested)
+        inner_func = next(f for f in functions if f.function_name == "inner_function")
+        assert inner_func.line_number == 2
+
+        # Check outer method
+        outer_method = next(f for f in functions if f.function_name == "outer_method")
+        assert outer_method.line_number == 7
+        assert outer_method.class_name == "OuterClass"
+
+        # Check inner method (nested)
+        inner_method = next(f for f in functions if f.function_name == "inner_method")
+        assert inner_method.line_number == 8
+
+        # Check standalone function
+        standalone_func = next(
+            f for f in functions if f.function_name == "standalone_function"
+        )
+        assert standalone_func.line_number == 12

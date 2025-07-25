@@ -32,8 +32,8 @@ class Settings(BaseSettings):
     # LLM Settings
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
-    llm_provider: str = "openai"
-    llm_model: str = "gpt-4"
+    llm_provider: str = "ollama"
+    llm_model: str = "llama2"
     llm_temperature: float = 0.1
     llm_timeout: int = 30
     ollama_base_url: str = "http://localhost:11434"
@@ -71,8 +71,14 @@ def load_config(config_path: Optional[str] = None) -> Config:
     # Try to load from YAML file
     if config_path is None:
         config_path = "docstringinator.yaml"
+    elif hasattr(config_path, "default"):  # Handle Typer OptionInfo objects
+        config_path = (
+            config_path.default
+            if config_path.default is not None
+            else "docstringinator.yaml"
+        )
 
-    config_file = Path(config_path)
+    config_file = Path(str(config_path))
     if config_file.exists():
         try:
             with config_file.open(encoding="utf-8") as f:
@@ -198,6 +204,8 @@ def _settings_to_config_dict(settings: Settings) -> dict:
             "include_examples": settings.include_examples,
             "include_type_hints": settings.include_type_hints,
             "max_line_length": settings.max_line_length,
+            "include_raises": True,
+            "include_returns": True,
         },
         "output": {
             "verbose": settings.verbose,
@@ -207,22 +215,22 @@ def _settings_to_config_dict(settings: Settings) -> dict:
 
 
 def create_default_config(config_path: str = "docstringinator.yaml") -> None:
-    """Create a default configuration file.
+    """Create a default configuration file at the specified path.
 
     Args:
         config_path: Path where to create the configuration file.
     """
     default_config = {
         "llm": {
-            "provider": "openai",
-            "model": "gpt-4",
-            "api_key": "${OPENAI_API_KEY}",
+            "provider": "ollama",
+            "model": "llama2",
+            "base_url": "http://localhost:11434",
             "temperature": 0.1,
             "timeout": 30,
-            # Ollama settings (uncomment to use Ollama)
-            # "provider": "ollama",
-            # "model": "llama2",
-            # "base_url": "http://localhost:11434",
+            # OpenAI settings (uncomment to use OpenAI)
+            # "provider": "openai",
+            # "model": "gpt-4",
+            # "api_key": "${OPENAI_API_KEY}",
         },
         "format": {
             "style": "google",
@@ -261,7 +269,7 @@ def create_default_config(config_path: str = "docstringinator.yaml") -> None:
 
 
 def validate_config(config: Config) -> None:
-    """Validate configuration settings.
+    """Validate a configuration object.
 
     Args:
         config: Configuration object to validate.

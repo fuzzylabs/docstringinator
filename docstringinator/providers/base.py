@@ -1,6 +1,5 @@
 """Base classes for LLM providers."""
 
-import json
 from abc import ABC, abstractmethod
 from typing import Any, Dict
 
@@ -74,35 +73,98 @@ class LLMProviderBase(ABC):
             format_examples[DocstringFormat.GOOGLE],
         )
 
-        return f"""You are a Python documentation expert. Generate a high-quality docstring for the following function using {format_style.value} style.
+        # Build context about the function
+        context_parts = []
+        if docstring_info.class_name:
+            context_parts.append(
+                f"This is a method of the {docstring_info.class_name} class.",
+            )
+        if docstring_info.is_async:
+            context_parts.append("This is an async function.")
+        if docstring_info.function_name.startswith(
+            "__",
+        ) and docstring_info.function_name.endswith("__"):
+            context_parts.append("This is a special/magic method.")
 
-Function Information:
-- Name: {docstring_info.function_name}
-- Class: {docstring_info.class_name or 'N/A'}
-- Module: {docstring_info.module_name}
-- Signature: {docstring_info.signature}
-- Return Type: {docstring_info.return_type or 'N/A'}
-- Parameters: {json.dumps(docstring_info.parameters, indent=2)}
-- Is Method: {docstring_info.is_method}
-- Is Async: {docstring_info.is_async}
+        context = (
+            " ".join(context_parts) if context_parts else "This is a regular function."
+        )
 
-Example {format_style.value} style docstring:
+        # Format parameters for better readability
+        param_descriptions = []
+        if docstring_info.parameters:
+            for param in docstring_info.parameters:
+                param_str = f"  - {param['name']}: {param['type']}"
+                if not param.get("required", True):
+                    param_str += f" (optional, default: {param.get('default', 'None')})"
+                param_descriptions.append(param_str)
+
+        param_info = (
+            "\n".join(param_descriptions) if param_descriptions else "  - No parameters"
+        )
+
+        # Determine what sections to include based on function characteristics
+        has_parameters = bool(docstring_info.parameters)
+        has_return_type = bool(
+            docstring_info.return_type and docstring_info.return_type.lower() != "none",
+        )
+        has_function_body = bool(
+            docstring_info.function_body and docstring_info.function_body.strip(),
+        )
+
+        # Check if function body suggests it might raise exceptions
+        might_raise_exceptions = False
+        if has_function_body:
+            body_lower = docstring_info.function_body.lower()
+            might_raise_exceptions = any(
+                keyword in body_lower
+                for keyword in [
+                    "raise",
+                    "except",
+                    "error",
+                    "assert",
+                    "if ",
+                    "validation",
+                    "check",
+                ]
+            )
+
+        return f"""You are an expert Python developer. Write a concise, accurate docstring for this function.
+
+FUNCTION:
+{docstring_info.signature}
+
+FUNCTION BODY:
+{docstring_info.function_body or "# Function body not available"}
+
+ANALYSIS:
+- Function name: {docstring_info.function_name}
+- {context}
+- Has parameters: {has_parameters}
+- Returns: {docstring_info.return_type or 'None/unspecified'}
+- Might raise exceptions: {might_raise_exceptions}
+
+REQUIREMENTS:
+1. Write ONLY the docstring content (no triple quotes)
+2. Start with a brief, clear description of what the function does (analyze the actual code)
+3. Be concise - avoid unnecessary words like "This function"
+4. ONLY include sections that are relevant:
+   - Include Args section ONLY if function has parameters
+   - Include Returns section ONLY if function returns something meaningful (not None)
+   - Include Raises section ONLY if function might raise exceptions (has conditionals, validations, etc.)
+5. Use {format_style.value} format
+6. Keep descriptions short and precise
+
+STYLE EXAMPLE:
 {example}
 
-Please generate a docstring for this function. The docstring should:
-1. Clearly describe what the function does
-2. Document all parameters with types and descriptions
-3. Document the return value if applicable
-4. Include examples if the function is simple enough
-5. Document any exceptions that might be raised
-6. Use proper British English spelling (e.g., 'analyse' not 'analyze', 'colour' not 'color')
+ANALYSIS GUIDELINES:
+- Look at the function body to understand what it actually does
+- For simple functions that just return a value, keep the description very brief
+- Don't include empty or placeholder sections
+- Focus on the function's purpose, not implementation details
 
-Function to document:
-```python
-{docstring_info.signature}
-```
-
-Generate only the docstring content (without the triple quotes):"""
+Generate a concise docstring:"""
 
     def _get_google_example(self) -> str:
         """Get Google style docstring example.
@@ -114,20 +176,21 @@ Generate only the docstring content (without the triple quotes):"""
     """Calculate the area of a circle.
 
     Args:
-        radius: The radius of the circle in metres.
+        radius: The radius of the circle in meters.
 
     Returns:
-        The area of the circle in square metres.
+        The area in square meters.
 
     Raises:
         ValueError: If radius is negative.
-
-    Example:
-        >>> calculate_area(5.0)
-        78.53981633974483
     """'''
 
     def _get_numpy_example(self) -> str:
+        """Get NumPy style docstring example.
+
+        Returns:
+            Example NumPy style docstring.
+        """
         return '''def calculate_area(radius: float) -> float:
     """
     Calculate the area of a circle.
@@ -135,35 +198,32 @@ Generate only the docstring content (without the triple quotes):"""
     Parameters
     ----------
     radius : float
-        The radius of the circle in metres.
+        The radius of the circle in meters.
 
     Returns
     -------
     float
-        The area of the circle in square metres.
+        The area in square meters.
 
     Raises
     ------
     ValueError
         If radius is negative.
-
-    Examples
-    --------
-    >>> calculate_area(5.0)
-    78.53981633974483
     """'''
 
     def _get_restructuredtext_example(self) -> str:
+        """Get reStructuredText style docstring example.
+
+        Returns:
+            Example reStructuredText style docstring.
+        """
         return '''def calculate_area(radius: float) -> float:
     """
     Calculate the area of a circle.
 
-    :param radius: The radius of the circle in metres.
+    :param radius: The radius of the circle in meters.
     :type radius: float
-    :returns: The area of the circle in square metres.
+    :returns: The area in square meters.
     :rtype: float
     :raises ValueError: If radius is negative.
-    :Example:
-        >>> calculate_area(5.0)
-        78.53981633974483
     """'''

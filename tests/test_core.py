@@ -523,3 +523,272 @@ class TestDocstringinator:
 
         # Should not raise any exceptions
         docstringinator.print_batch_results(result)
+
+    @patch("docstringinator.core.create_llm_provider")
+    @patch("docstringinator.core.load_config")
+    @patch("docstringinator.core.validate_config")
+    def test_clean_docstring(
+        self, mock_validate_config, mock_load_config, mock_create_llm,
+    ):
+        """Test docstring cleanup functionality."""
+        # Mock the configuration
+        mock_config = Config(
+            llm=LLMConfig(
+                provider=LLMProvider.LOCAL,
+                model="test-model",
+                api_key="test-key",
+                temperature=0.1,
+            ),
+        )
+        mock_load_config.return_value = mock_config
+
+        # Mock the LLM provider
+        mock_llm_provider = Mock()
+        mock_create_llm.return_value = mock_llm_provider
+
+        docstringinator = Docstringinator()
+
+        # Test docstring with triple quotes on separate lines
+        docstring_with_quotes = '''"""
+This is a test docstring.
+"""
+'''
+        cleaned = docstringinator._clean_docstring(docstring_with_quotes)
+        assert '"""' not in cleaned
+        assert "This is a test docstring." in cleaned
+
+        # Test docstring with triple quotes at start/end
+        docstring_with_quotes_2 = '"""This is another test docstring."""'
+        cleaned2 = docstringinator._clean_docstring(docstring_with_quotes_2)
+        assert '"""' not in cleaned2
+        assert "This is another test docstring." in cleaned2
+
+        # Test docstring without triple quotes
+        docstring_without_quotes = "This is a test docstring."
+        cleaned3 = docstringinator._clean_docstring(docstring_without_quotes)
+        assert cleaned3 == "This is a test docstring."
+
+        # Test empty docstring
+        empty_docstring = ""
+        cleaned4 = docstringinator._clean_docstring(empty_docstring)
+        assert cleaned4 == "No description available."
+
+    @patch("docstringinator.core.create_llm_provider")
+    @patch("docstringinator.core.load_config")
+    @patch("docstringinator.core.validate_config")
+    def test_end_to_end_multiple_functions(
+        self, mock_validate_config, mock_load_config, mock_create_llm,
+    ):
+        """Test end-to-end docstring addition for multiple functions."""
+        # Mock the configuration
+        mock_config = Config(
+            llm=LLMConfig(
+                provider=LLMProvider.LOCAL,
+                model="test-model",
+                api_key="test-key",
+                temperature=0.1,
+            ),
+        )
+        mock_load_config.return_value = mock_config
+
+        # Mock the LLM provider to return a simple docstring
+        mock_llm_provider = Mock()
+        mock_response = Mock()
+        mock_response.content = "Test docstring."
+        mock_llm_provider.generate_docstring.return_value = mock_response
+        mock_create_llm.return_value = mock_llm_provider
+
+        docstringinator = Docstringinator()
+
+        # Create a test file with multiple functions
+        test_content = """def simple_function():
+    return True
+
+def multi_line_function(
+    param1: str,
+    param2: int = 10,
+    param3: list = None
+) -> dict:
+    return {"param1": param1, "param2": param2, "param3": param3}
+
+def complex_function(
+    first_param: str,
+    second_param: int,
+    third_param: list,
+    fourth_param: dict,
+    fifth_param: bool = True,
+    sixth_param: float = 0.0
+) -> tuple:
+    return (first_param, second_param, third_param)
+
+class TestClass:
+    def __init__(self, value: int = 0):
+        self.value = value
+
+    def method_with_params(
+        self,
+        param1: str,
+        param2: int,
+        param3: list = None
+    ) -> str:
+        return f"{param1}: {param2}"
+
+def final_function():
+    return "done"
+"""
+
+        # Create temporary file
+        import os
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+            f.write(test_content)
+            temp_file_path = f.name
+
+        try:
+            # Run docstringinator
+            result = docstringinator.fix_file(temp_file_path)
+
+            # Check that changes were made
+            assert result.success
+            assert len(result.changes) > 0
+
+            # Read the result and check docstring placement
+            with open(temp_file_path) as f:
+                result_content = f.read()
+
+            lines = result_content.split("\n")
+
+            # Check that docstrings are placed correctly for each function
+            # Simple function should have docstring after line 1
+            simple_func_line = None
+            for i, line in enumerate(lines):
+                if line.strip() == "def simple_function():":
+                    simple_func_line = i
+                    break
+
+            assert simple_func_line is not None
+            # Docstring should be on the line after the function definition
+            # The docstring is inserted as multiple lines: opening quote, content, closing quote
+            # Since the function definition is at simple_func_line, the docstring should be at simple_func_line + 1
+            docstring_start_line = simple_func_line + 1
+            assert docstring_start_line < len(lines)
+            assert '"""' in lines[docstring_start_line]
+
+            # Return statement should come after the docstring
+            return_line = None
+            for i in range(
+                docstring_start_line + 2, len(lines),
+            ):  # Skip the docstring lines (new format: opening+content line, closing line)
+                if "return True" in lines[i]:
+                    return_line = i
+                    break
+
+            assert return_line is not None
+            assert return_line > docstring_start_line
+
+        finally:
+            # Clean up
+            os.unlink(temp_file_path)
+
+    @patch("docstringinator.core.create_llm_provider")
+    @patch("docstringinator.core.load_config")
+    @patch("docstringinator.core.validate_config")
+    def test_docstring_placement_accuracy(
+        self, mock_validate_config, mock_load_config, mock_create_llm,
+    ):
+        """Test that docstrings are placed in the correct positions."""
+        # Mock the configuration
+        mock_config = Config(
+            llm=LLMConfig(
+                provider=LLMProvider.LOCAL,
+                model="test-model",
+                api_key="test-key",
+                temperature=0.1,
+            ),
+        )
+        mock_load_config.return_value = mock_config
+
+        # Mock the LLM provider to return a simple docstring
+        mock_llm_provider = Mock()
+        mock_response = Mock()
+        mock_response.content = "Test docstring."
+        mock_llm_provider.generate_docstring.return_value = mock_response
+        mock_create_llm.return_value = mock_llm_provider
+
+        docstringinator = Docstringinator()
+
+        # Create a test file with specific structure
+        test_content = """def function1():
+    return True
+
+def function2(
+    param1: str,
+    param2: int
+) -> dict:
+    return {"param1": param1, "param2": param2}
+
+def function3():
+    return False
+"""
+
+        # Create temporary file
+        import os
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+            f.write(test_content)
+            temp_file_path = f.name
+
+        try:
+            # Run docstringinator
+            result = docstringinator.fix_file(temp_file_path)
+
+            # Check that changes were made
+            assert result.success
+            assert len(result.changes) > 0
+
+            # Read the result and check docstring placement
+            with open(temp_file_path) as f:
+                result_content = f.read()
+
+            lines = result_content.split("\n")
+
+            # Find function positions
+            func1_line = None
+            func2_line = None
+            func3_line = None
+
+            for i, line in enumerate(lines):
+                if line.strip() == "def function1():":
+                    func1_line = i
+                elif line.strip() == "def function2(":
+                    func2_line = i
+                elif line.strip() == "def function3():":
+                    func3_line = i
+
+            # Check that all functions were found
+            assert func1_line is not None
+            assert func2_line is not None
+            assert func3_line is not None
+
+            # Check that docstrings are placed after function definitions, not after return statements
+            # Function 1 docstring should be after function definition
+            if func1_line + 1 < len(lines):
+                assert '"""' in lines[func1_line + 1]
+
+                # Function 2 docstring should be after function signature (not in the middle)
+                # Find where function 2 signature ends (after the closing parenthesis)
+                func2_signature_end = None
+                for i in range(func2_line, len(lines)):
+                    if "-> dict:" in lines[i]:
+                        func2_signature_end = i
+                        break
+
+                if func2_signature_end is not None:
+                    # Docstring should be right after the signature
+                    assert '"""' in lines[func2_signature_end + 1]
+
+        finally:
+            # Clean up
+            os.unlink(temp_file_path)

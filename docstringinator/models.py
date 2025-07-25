@@ -164,6 +164,10 @@ class DocstringInfo(BaseModel):
         default_factory=list,
         description="Function parameters",
     )
+    function_body: Optional[str] = Field(
+        default=None,
+        description="Function body (first few lines for context)",
+    )
 
 
 class ProcessingResult(BaseModel):

@@ -1,0 +1,48 @@
+llm:
+  provider: "ollama"
+  model: "qwen2.5-coder:14b"
+  base_url: "http://localhost:11434"
+  temperature: 0.1
+  timeout: 30
+
+format:
+  style: "google"
+  include_examples: true
+  include_type_hints: true
+  max_line_length: 88
+  include_raises: true
+  include_returns: true
+
+processing:
+  dry_run: false
+  backup_files: false
+  max_file_size: 1000000
+  exclude_patterns:
+    - "*/tests/*"
+    - "*/migrations/*"
+    - "*/venv/*"
+    - "*/.venv/*"
+    - "*/.git/*"
+    - "*/.github/*"
+    - "*/.vscode/*"
+    - "*/.idea/*"
+    - "*/.pytest_cache/*"
+    - "*/.mypy_cache/*"
+    - "*/.ruff_cache/*"
+    - "*/.coverage/*"
+    - "*/.tox/*"
+    - "*/.eggs/*"
+    - "*/.eggs-info/*"
+    - "*/__pycache__/*"
+    - "*/build/*"
+    - "*/dist/*"
+    - "*/node_modules/*"
+    - "*/.*/*"
+  include_patterns:
+    - "*.py"
+
+output:
+  verbose: true
+  show_diff: true
+  create_backup: false
+  output_format: "text"

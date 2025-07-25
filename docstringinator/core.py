@@ -1,5 +1,6 @@
 """Core Docstringinator functionality."""
 
+import re
 import shutil
 import time
 from pathlib import Path
@@ -80,7 +81,13 @@ class Docstringinator:
 
         # Override with provided arguments
         if llm_provider:
-            config.llm.provider = LLMProvider(llm_provider)
+            # Handle Typer OptionInfo objects
+            if hasattr(llm_provider, "default"):
+                provider_value = llm_provider.default
+            else:
+                provider_value = str(llm_provider)
+            if provider_value:
+                config.llm.provider = LLMProvider(provider_value)
         if api_key:
             config.llm.api_key = api_key
 
@@ -396,18 +403,26 @@ class Docstringinator:
             Change object if docstring was modified, None otherwise.
         """
         try:
-            # Generate new docstring
-            response = self.llm_provider.generate_docstring(
-                func,
-                self.config.format.style,
-            )
-
-            new_docstring = self._clean_docstring(response.content)
-
             # Check if docstring needs to be added or improved
             if not func.has_docstring:
+                # Generate new docstring for functions without docstrings
+                response = self.llm_provider.generate_docstring(
+                    func,
+                    self.config.format.style,
+                )
+                new_docstring = self._clean_docstring(response.content)
                 return self._add_docstring(file_path, func, new_docstring)
-            return self._improve_docstring(file_path, func, new_docstring)
+
+            # For existing docstrings, only improve if they're poor quality
+            if self._should_improve_docstring(func):
+                response = self.llm_provider.generate_docstring(
+                    func,
+                    self.config.format.style,
+                )
+                new_docstring = self._clean_docstring(response.content)
+                return self._improve_docstring(file_path, func, new_docstring)
+
+            return None
 
         except OSError as e:
             if self.config.output.verbose:
@@ -426,15 +441,92 @@ class Docstringinator:
             Cleaned docstring.
         """
         try:
-            # Remove triple quotes if present
-            if (docstring.startswith('"""') and docstring.endswith('"""')) or (
-                docstring.startswith("'''") and docstring.endswith("'''")
-            ):
-                docstring = docstring[3:-3]
+            # Remove triple quotes if present (at start/end or on separate lines)
+            lines = docstring.split("\n")
 
-            return docstring  # noqa: TRY300
+            # Remove opening triple quotes from first line
+            if lines and lines[0].strip() in ['"""', "'''"]:
+                lines.pop(0)
 
-        except OSError as e:
+            # Remove closing triple quotes from last line
+            if lines and lines[-1].strip() in ['"""', "'''"]:
+                lines.pop()
+
+            # Also handle case where quotes are at start/end of first/last line
+            if lines:
+                first_line = lines[0].strip()
+                if first_line.startswith('"""') or first_line.startswith("'''"):
+                    # Remove leading triple quotes
+                    lines[0] = first_line[3:].strip()
+
+                # Also check if the line ends with triple quotes
+                if lines[0].endswith('"""') or lines[0].endswith("'''"):
+                    lines[0] = lines[0][:-3].strip()
+
+            if lines:
+                last_line = lines[-1].strip()
+                if last_line.endswith('"""') or last_line.endswith("'''"):
+                    # Remove trailing triple quotes
+                    lines[-1] = last_line[:-3].strip()
+
+                # Also check if the line starts with triple quotes
+                if lines[-1].startswith('"""') or lines[-1].startswith("'''"):
+                    lines[-1] = lines[-1][3:].strip()
+
+            docstring = "\n".join(lines)
+
+            # Remove any nested function definitions or malformed content
+            lines = docstring.split("\n")
+            cleaned_lines = []
+            in_function_def = False
+            in_nested_docstring = False
+
+            for line in lines:
+                original_line = line
+                line = line.strip()
+
+                # Skip lines that look like function definitions
+                if line.startswith("def ") or line.startswith("async def "):
+                    in_function_def = True
+                    continue
+
+                # Handle nested docstrings
+                if line.startswith('"""') and in_function_def:
+                    in_nested_docstring = not in_nested_docstring
+                    if not in_nested_docstring:  # End of nested docstring
+                        in_function_def = False
+                    continue
+
+                if in_function_def or in_nested_docstring:
+                    continue
+
+                # Skip lines that are just closing quotes
+                if line == '"""' or line == "'''":
+                    continue
+
+                # Skip empty lines at the beginning and end
+                if not line and (not cleaned_lines or not cleaned_lines[-1]):
+                    continue
+
+                cleaned_lines.append(original_line.rstrip())
+
+            # Remove trailing empty lines
+            while cleaned_lines and not cleaned_lines[-1].strip():
+                cleaned_lines.pop()
+
+            # Remove leading empty lines
+            while cleaned_lines and not cleaned_lines[0].strip():
+                cleaned_lines.pop(0)
+
+            result = "\n".join(cleaned_lines)
+
+            # Ensure the result is not empty
+            if not result.strip():
+                return "No description available."
+
+            return result
+
+        except Exception as e:
             if self.config.output.verbose:
                 self.console.print(
                     f"[yellow]Warning: Failed to clean docstring: {e}[/yellow]",
@@ -457,11 +549,11 @@ class Docstringinator:
         Returns:
             Change object or None if no change needed.
         """
-        # This is a placeholder implementation
-        # In a real implementation, you would modify the file
+        # The parser now provides the correct line number where the function signature ends
+        # We want to insert the docstring at that line
         return Change(
             file_path=file_path,
-            line_number=func.line_number,
+            line_number=func.line_number,  # Insert at the function signature end line
             original_text="",
             new_text=new_docstring,
             change_type="add",
@@ -509,21 +601,35 @@ class Docstringinator:
 
         docstring = func.existing_docstring.strip()
 
-        # Check if docstring is too short
-        if len(docstring) < 20:
+        # Check if docstring is too short (less than 10 characters)
+        if len(docstring) < 10:
             return True
 
-        # Check if docstring lacks key elements
+        # Check if docstring is just a single word or very basic
+        if len(docstring.split()) <= 2:
+            return True
+
+        # Check if docstring lacks key elements only for complex functions
         docstring_lower = docstring.lower()
         has_params = any(keyword in docstring_lower for keyword in ["param", "arg"])
         has_returns = "return" in docstring_lower
 
-        # If function has parameters but docstring doesn't document them
-        if func.parameters and not has_params:
+        # Only improve if function has parameters but docstring doesn't document them
+        # AND the function has more than 2 parameters
+        if func.parameters and len(func.parameters) > 2 and not has_params:
             return True
 
-        # If function has return type but docstring doesn't document it
-        return bool(func.return_type and not has_returns)
+        # Only improve if function has return type but docstring doesn't document it
+        # AND the return type is complex (not just basic types)
+        if func.return_type and not has_returns:
+            complex_types = ["dict", "list", "tuple", "set", "union", "optional"]
+            if any(
+                complex_type in func.return_type.lower()
+                for complex_type in complex_types
+            ):
+                return True
+
+        return False
 
     def _apply_changes(self, file_path: Path, changes: List[Change]) -> None:
         """Apply changes to a file.
@@ -532,16 +638,93 @@ class Docstringinator:
             file_path: Path to the file.
             changes: List of changes to apply.
         """
+        if not changes:
+            return
+
         # Read the file
         with file_path.open(encoding="utf-8") as f:
             lines = f.readlines()
 
-        # Apply changes in reverse order to maintain line numbers
-        for _change in sorted(changes, key=lambda x: x.line_number, reverse=True):
-            # Insert docstring after function definition
-            # This is a simplified implementation - in practice, you'd want
-            # more sophisticated parsing to handle different function formats
-            pass
+        # Apply changes in reverse order to maintain correct line numbers
+        for change in sorted(changes, key=lambda x: x.line_number, reverse=True):
+            if change.change_type == "add":
+                # Insert docstring after function definition line
+                # Determine proper indentation based on the function definition
+                func_def_line = change.line_number - 1
+                if func_def_line >= 0 and func_def_line < len(lines):
+                    # Find the indentation of the function definition
+                    func_line = lines[func_def_line]
+                    indent_match = re.match(r"^(\s*)", func_line)
+                    if indent_match:
+                        base_indent = indent_match.group(1)
+                        # Add one level of indentation for the docstring
+                        indent = base_indent + "    "
+                    else:
+                        indent = "    "  # Fallback
+                else:
+                    indent = "    "  # Fallback
+
+                docstring_lines = change.new_text.strip().split("\n")
+
+                # Format the docstring properly
+                formatted_docstring = []
+
+                if docstring_lines:
+                    # Put the first line on the same line as the opening triple quotes
+                    first_line = docstring_lines[0].strip()
+                    if first_line:
+                        formatted_docstring.append(f'{indent}"""{first_line}\n')
+                    else:
+                        formatted_docstring.append(f'{indent}"""\n')
+
+                    # Add remaining lines (starting from index 1)
+                    for line in docstring_lines[1:]:
+                        if line.strip():  # Only add non-empty lines
+                            formatted_docstring.append(f"{indent}{line}\n")
+                        else:
+                            formatted_docstring.append(f"{indent}\n")
+                else:
+                    # Fallback for empty docstring
+                    formatted_docstring.append(f'{indent}"""\n')
+
+                formatted_docstring.append(f'{indent}"""\n')
+
+                # Insert after the function definition line
+                # Insert each line of the docstring separately
+                for i, line in enumerate(formatted_docstring):
+                    lines.insert(change.line_number + i, line)
+
+            elif change.change_type == "modify":
+                # Replace existing docstring
+                # Find the docstring lines and replace them
+                start_line = change.line_number
+                end_line = start_line
+
+                # Find the end of the existing docstring
+                for i in range(start_line, len(lines)):
+                    if '"""' in lines[i] or "'''" in lines[i]:
+                        end_line = i + 1
+                        break
+
+                # Replace the docstring lines
+                indent = "    "  # Standard Python indentation
+                docstring_lines = change.new_text.strip().split("\n")
+
+                # Format the docstring properly
+                formatted_docstring = []
+                formatted_docstring.append(f'{indent}"""\n')
+                for line in docstring_lines:
+                    if line.strip():  # Only add non-empty lines
+                        formatted_docstring.append(f"{indent}{line}\n")
+                    else:
+                        formatted_docstring.append(f"{indent}\n")
+                formatted_docstring.append(f'{indent}"""\n')
+
+                # Remove old lines and insert new ones
+                del lines[start_line:end_line]
+                # Insert each line of the docstring separately
+                for i, line in enumerate(formatted_docstring):
+                    lines.insert(start_line + i, line)
 
         # Write the file
         with file_path.open("w", encoding="utf-8") as f:

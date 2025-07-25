@@ -20,51 +20,22 @@ app = typer.Typer(
 console = Console()
 
 
-@app.command()
 def main(
-    target: str = typer.Argument(
-        ...,
-        help="File or directory to process",
-    ),
+    target: Optional[str] = typer.Argument(None, help="File or directory to process"),
     config: Optional[str] = typer.Option(
-        None,
-        "--config",
-        "-c",
-        help="Path to configuration file",
+        None, "--config", "-c", help="Path to configuration file",
     ),
     provider: Optional[str] = typer.Option(
-        None,
-        "--provider",
-        "-p",
-        help="LLM provider to use (openai, anthropic, local)",
+        None, "--provider", "-p", help="LLM provider (openai, anthropic, ollama)",
     ),
     api_key: Optional[str] = typer.Option(
-        None,
-        "--api-key",
-        "-k",
-        help="API key for the LLM provider",
+        None, "--api-key", "-k", help="API key for LLM provider",
     ),
-    dry_run: bool = typer.Option(  # noqa: FBT001
-        False,  # noqa: FBT003
-        "--dry-run",
-        "-n",
-        help="Preview changes without applying them",
-        is_flag=True,
+    dry_run: bool = typer.Option(
+        False, "--dry-run", "-d", help="Preview changes without applying them",
     ),
-    verbose: bool = typer.Option(  # noqa: FBT001
-        True,  # noqa: FBT003
-        "--verbose",
-        "-v",
-        help="Enable verbose output",
-        is_flag=True,
-    ),
-    quiet: bool = typer.Option(  # noqa: FBT001
-        False,  # noqa: FBT003
-        "--quiet",
-        "-q",
-        help="Suppress output",
-        is_flag=True,
-    ),
+    verbose: bool = typer.Option(True, "--verbose", "-v", help="Enable verbose output"),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress output"),
     format_style: Optional[str] = typer.Option(
         None,
         "--format",
@@ -72,19 +43,11 @@ def main(
         help="Docstring format style (google, numpy, restructuredtext)",
     ),
     temperature: Optional[float] = typer.Option(
-        None,
-        "--temperature",
-        "-t",
-        help="Temperature for LLM generation (0.0-2.0)",
+        None, "--temperature", "-t", help="Temperature for LLM generation (0.0-2.0)",
     ),
-    model: Optional[str] = typer.Option(
-        None,
-        "--model",
-        "-m",
-        help="LLM model to use",
-    ),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model to use"),
 ) -> None:
-    """Fix docstrings in Python files using LLMs.
+    """Process Python files to add or improve docstrings.
 
     Examples:
         # Fix a single file
@@ -115,6 +78,12 @@ def main(
             config_overrides["llm"] = {"temperature": temperature}
         if model:
             config_overrides["llm"] = {"model": model}
+
+        # Check if target is provided
+        if not target:
+            console.print("[red]Error: No target file or directory specified[/red]")
+            console.print("Use 'docstringinator --help' for usage information")
+            sys.exit(1)
 
         # Initialise Docstringinator
         docstringinator = Docstringinator(
@@ -171,22 +140,11 @@ def main(
 
 
 @app.command()
-def init(
-    config_path: str = typer.Option(
-        "docstringinator.yaml",
-        "--config",
-        "-c",
-        help="Path where to create the configuration file",
-    ),
-) -> None:
+def init(config_path: str = "docstringinator.yaml") -> None:
     """Create a default configuration file.
 
-    Examples:
-        # Create default config
-        docstringinator init
-
-        # Create config with custom path
-        docstringinator init --config my_config.yaml
+    Args:
+        config_path: Path where to create the configuration file.
     """
     try:
         create_default_config(config_path)
@@ -218,28 +176,28 @@ def info() -> None:
     from . import __author__, __email__, __version__
 
     info_text = f"""
-    [bold]Docstringinator[/bold] - A Python tool for automatically fixing and improving docstrings using LLMs
+    Docstringinator - A Python tool for automatically fixing and improving docstrings using LLMs
 
-    [bold]Version:[/bold] {__version__}
-    [bold]Author:[/bold] {__author__}
-    [bold]Email:[/bold] {__email__}
+    Version: {__version__}
+    Author: {__author__}
+    Email: {__email__}
 
-    [bold]Features:[/bold]
-    • Automatic docstring generation for functions, classes, and modules
-    • Docstring improvement with better formatting and clarity
-    • Pre-commit integration for automated quality control
-    • Multiple LLM support (OpenAI, Anthropic, etc.)
-    • Customisable formatting (Google, NumPy, reStructuredText)
-    • Batch processing of entire directories
-    • Dry-run mode to preview changes
+    Features:
+    - Automatic docstring generation for functions, classes, and modules
+    - Docstring improvement with better formatting and clarity
+    - Pre-commit integration for automated quality control
+    - Multiple LLM support (OpenAI, Anthropic, etc.)
+    - Customisable formatting (Google, NumPy, reStructuredText)
+    - Batch processing of entire directories
+    - Dry-run mode to preview changes
 
-    [bold]Usage:[/bold]
+    Usage:
     docstringinator <file_or_directory> [options]
 
-    [bold]Examples:[/bold]
-    • docstringinator path/to/file.py
-    • docstringinator path/to/directory/ --dry-run
-    • docstringinator path/to/file.py --provider openai --api-key your-key
+    Examples:
+    - docstringinator path/to/file.py
+    - docstringinator path/to/directory/ --dry-run
+    - docstringinator path/to/file.py --provider openai --api-key your-key
     """
 
     console.print(Panel(info_text, title="About Docstringinator", border_style="green"))

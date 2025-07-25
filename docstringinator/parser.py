@@ -140,19 +140,27 @@ class PythonParser:
         line_number = node.lineno
         end_line_number = self._get_function_end_line(node, lines)
 
+        # For docstring insertion, we need the line after the function signature ends
+        # Find where the function signature actually ends (where the colon is)
+        signature_end_line = self._get_function_signature_end_line(node, lines)
+
+        # Extract function body for context (first few lines)
+        function_body = self._extract_function_body(node, lines)
+
         return DocstringInfo(
             function_name=node.name,
             class_name=class_name,
             module_name=self.module_name,
             signature=signature,
             existing_docstring=existing_docstring,
-            line_number=line_number,
+            line_number=signature_end_line,  # Use signature end line for docstring insertion
             end_line_number=end_line_number,
             has_docstring=existing_docstring is not None,
             is_method=class_name is not None,
             is_async=isinstance(node, ast.AsyncFunctionDef),
             return_type=return_type,
             parameters=parameters,
+            function_body=function_body,
         )
 
     def _get_class_name(
@@ -188,15 +196,56 @@ class PythonParser:
         Returns:
             Function signature string.
         """
-        # Get the line with the function definition
-        line = lines[node.lineno - 1]
+        # Reconstruct the signature from the AST for better accuracy
+        signature_parts = []
 
-        # Find the end of the function definition
-        end_pos = line.find(":")
-        if end_pos == -1:
-            end_pos = len(line)
+        # Add async keyword if present
+        if isinstance(node, ast.AsyncFunctionDef):
+            signature_parts.append("async")
 
-        return line[:end_pos].strip()
+        # Add function name
+        signature_parts.append(f"def {node.name}")
+
+        # Add parameters
+        args = []
+        for arg in node.args.args:
+            arg_str = arg.arg
+            if arg.annotation:
+                arg_str += f": {ast.unparse(arg.annotation)}"
+            args.append(arg_str)
+
+        # Add defaults
+        defaults = node.args.defaults
+        required_count = len(args) - len(defaults)
+
+        for i, arg in enumerate(args):
+            if i >= required_count:
+                default_index = i - required_count
+                if default_index < len(defaults):
+                    default_value = ast.unparse(defaults[default_index])
+                    args[i] += f" = {default_value}"
+
+        # Add *args if present
+        if node.args.vararg:
+            vararg_str = f"*{node.args.vararg.arg}"
+            if node.args.vararg.annotation:
+                vararg_str += f": {ast.unparse(node.args.vararg.annotation)}"
+            args.append(vararg_str)
+
+        # Add **kwargs if present
+        if node.args.kwarg:
+            kwarg_str = f"**{node.args.kwarg.arg}"
+            if node.args.kwarg.annotation:
+                kwarg_str += f": {ast.unparse(node.args.kwarg.annotation)}"
+            args.append(kwarg_str)
+
+        signature_parts.append(f"({', '.join(args)})")
+
+        # Add return type if present
+        if node.returns:
+            signature_parts.append(f" -> {ast.unparse(node.returns)}")
+
+        return " ".join(signature_parts)
 
     def _extract_parameters(
         self,
@@ -340,6 +389,115 @@ class PythonParser:
                 return i - 1
 
         return len(lines)
+
+    def _get_function_signature_end_line(
+        self,
+        node: Union[ast.FunctionDef, ast.AsyncFunctionDef],
+        lines: List[str],
+    ) -> int:
+        """
+        Get the line number where the function signature ends (where the colon is).
+        """
+        start_line = node.lineno - 1  # Convert to 0-based index
+
+        # Walk forward from the start line until we find a line that ends the signature
+        for i in range(start_line, len(lines)):
+            line = lines[i]
+            line_stripped = line.strip()
+
+            # Skip empty lines and comments
+            if not line_stripped or line_stripped.startswith("#"):
+                continue
+
+            # Look for a line that ends with a colon - this indicates the end of a function signature
+            # This check must come BEFORE checking for function body elements
+            # Handle cases where the colon is followed by a comment
+            if line_stripped.endswith(":"):
+                return i + 1  # 1-based index for insertion
+            if ":" in line_stripped:
+                # Check if the colon is followed by a comment
+                colon_index = line_stripped.find(":")
+                if colon_index != -1:
+                    # Check if everything after the colon is just a comment
+                    after_colon = line_stripped[colon_index + 1 :].strip()
+                    if not after_colon or after_colon.startswith("#"):
+                        return i + 1  # 1-based index for insertion
+
+            # If we find a line that's not indented and looks like a new function/class, we've gone too far
+            if i > start_line and line_stripped and not line.startswith((" ", "\t")):
+                if line_stripped.startswith(("def ", "class ", "@")):
+                    break
+
+            # If we find a docstring, function body, or another function/class, we've gone too far
+            if (
+                line_stripped.startswith('"""')
+                or line_stripped.startswith("'''")
+                or line_stripped.startswith("return ")
+                or line_stripped.startswith("pass")
+            ):
+                break
+
+        # Fallback: return the start line + 1
+        return start_line + 1
+
+    def _extract_function_body(
+        self,
+        node: Union[ast.FunctionDef, ast.AsyncFunctionDef],
+        lines: List[str],
+    ) -> Optional[str]:
+        """Extract the function body as a string.
+
+        Args:
+            node: Function definition AST node.
+            lines: Source code lines.
+
+        Returns:
+            Function body string or None if no body.
+        """
+        try:
+            # Find where the function signature ends (where the colon is)
+            signature_end_line = self._get_function_signature_end_line(node, lines)
+            function_end_line = self._get_function_end_line(node, lines)
+
+            # Convert to 0-based indexing for array access
+            start_idx = signature_end_line  # signature_end_line is already 1-based, so this gives us the line after the colon
+            end_idx = min(
+                start_idx + 10, function_end_line, len(lines),
+            )  # Limit to first 10 lines or function end
+
+            if start_idx >= len(lines) or start_idx >= end_idx:
+                return None
+
+            # Extract the body lines
+            body_lines = []
+            for i in range(start_idx, end_idx):
+                if i < len(lines):
+                    line = lines[i].rstrip()
+                    # Skip empty lines at the beginning
+                    if not body_lines and not line.strip():
+                        continue
+                    # Stop if we hit another function or class definition
+                    if line.strip().startswith(
+                        ("def ", "class ", "@"),
+                    ) and not line.strip().startswith("    "):
+                        break
+                    body_lines.append(line)
+
+            if not body_lines:
+                return None
+
+            # Join the lines and limit length for context
+            body = "\n".join(body_lines)
+
+            # Truncate if too long (keep it reasonable for the prompt)
+            if len(body) > 500:
+                body = body[:500] + "\n    # ... (truncated)"
+
+            return body
+
+        except Exception:
+            # If anything goes wrong, return None
+            return None
 
 
 class DocstringExtractor:
