@@ -1,0 +1,68 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-docstring-first
+      - id: debug-statements
+      - id: requirements-txt-fixer
+      - id: check-toml
+
+  - repo: https://github.com/psf/black
+    rev: 23.12.1
+    hooks:
+      - id: black
+        language_version: python3
+        args: [--line-length=88]
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: [--profile=black, --line-length=88]
+
+  - repo: https://github.com/pre-commit/mirrors-ruff
+    rev: v0.1.6
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.8.0
+    hooks:
+      - id: mypy
+        additional_dependencies: [types-all]
+        args: [--ignore-missing-imports]
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.2.6
+    hooks:
+      - id: codespell
+        args: [--ignore-words-list=colour,analyse,behaviour,centre,defence,favour,favourite,favourable,favourably,favoured,favouring,favours,flavour,flavoured,flavouring,flavours,honour,honourable,honourably,honoured,honouring,honours,labour,laboured,labouring,labours,licence,licenced,licencing,licences,licencing,neighbour,neighbourhood,neighbouring,neighbours,organisation,organisational,organisations,organise,organised,organiser,organisers,organises,organising,programme,programmes,realise,realised,realises,realising,realisation,realisations,recognise,recognised,recognises,recognising,recognisation,recognisations,specialise,specialised,specialises,specialising,specialisation,specialisations,standardise,standardised,standardises,standardising,standardisation,standardisations,summarise,summarised,summarises,summarising,summarisation,summarisations,utilise,utilised,utilises,utilising,utilisation,utilisations]
+
+  - repo: https://github.com/pycqa/bandit
+    rev: 1.7.5
+    hooks:
+      - id: bandit
+        args: [-r, docstringinator/]
+
+  - repo: https://github.com/asottile/pyupgrade
+    rev: v3.15.0
+    hooks:
+      - id: pyupgrade
+        args: [--py38-plus]
+
+  - repo: local
+    hooks:
+      - id: docstringinator
+        name: Fix docstrings
+        entry: docstringinator
+        language: python
+        types: [python]
+        args: [--fix, --quiet]
+        pass_filenames: true 
